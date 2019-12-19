@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -67,12 +68,13 @@ func main() {
 	app := tview.NewApplication()
 	go func() {
 		err := syncChatLog(conf, messenger, chatView)
-		app.Stop()
-		panic(err)
+	    app.Stop()
+		log.Fatal(err)
 	}()
 
 	if err = app.SetRoot(flex, true).SetFocus(chatWindow).Run(); err != nil {
-		panic(err)
+	    app.Stop()
+		log.Fatal(err)
 	}
 }
 
@@ -161,11 +163,10 @@ func syncChatLog(conf Config, messenger chan Message, chatBox *tview.TextView) e
 				for i := 0; i < len(runes); i++ {
 					if runes[i] == '\n' {
 						runes = append(runes[:i], runes[i+1:]...)
-						i--
 					}
-                }
-                for i := 0; i < len(runes); i+=80 {
-                    runes = append(append(runes[:i], []rune("\n\t")...), runes[i:]...)
+				}
+				for i := 0; i < len(runes); i += 80 {
+					runes = append(append(runes[:i], []rune("\n\t")...), runes[i:]...)
 				}
 				chatBox.SetText(chatBox.GetText(false) + "\n" + msg.ServiceID + "> " + string(runes))
 			}
