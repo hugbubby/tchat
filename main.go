@@ -57,15 +57,16 @@ func main() {
 		privKey:     privKey,
 	}))
 
-	chatList := tview.NewList()
+	chatView := tview.NewTextView()
 
 	flex := tview.NewFlex().
 		SetDirection(tview.FlexRow).
-		AddItem(chatList, 0, 30, true).
+		AddItem(chatView, 0, 30, true).
 		AddItem(chatWindow, 0, 1, true)
+
 	app := tview.NewApplication()
 	go func() {
-		err := syncChatLog(conf, messenger, chatList)
+		err := syncChatLog(conf, messenger, chatView)
 		app.Stop()
 		panic(err)
 	}()
@@ -114,7 +115,7 @@ func messageDoneFunc(inp messageDoneFuncInput) func(key tcell.Key) {
 				vals := make(url.Values)
 				vals["signature"] = []string{sigEnc}
 				vals["message"] = []string{msgEnc}
-                resp, err := c.PostForm("http://"+inp.destination+".onion/send", vals)
+				resp, err := c.PostForm("http://"+inp.destination+".onion/send", vals)
 				return msg, resp, err
 			}
 		}
@@ -132,7 +133,7 @@ func messageDoneFunc(inp messageDoneFuncInput) func(key tcell.Key) {
 	}
 }
 
-func syncChatLog(conf Config, messenger chan Message, chatList *tview.List) error {
+func syncChatLog(conf Config, messenger chan Message, chatBox *tview.TextView) error {
 	u := url.URL{Scheme: "ws", Host: conf.ServerAddress, Path: "/read"}
 	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
@@ -156,7 +157,17 @@ func syncChatLog(conf Config, messenger chan Message, chatList *tview.List) erro
 		for {
 			select {
 			case msg := <-messenger:
-				chatList.AddItem(msg.ServiceID+"> "+msg.Content, "", 0, nil)
+				runes := []rune(msg.Content)
+				for i := 0; i < len(runes); i++ {
+					if runes[i] == '\n' {
+						runes = append(runes[:i], runes[i+1:]...)
+						i--
+					}
+                }
+                for i := 0; i < len(runes); i+=80 {
+                    runes = append(append(runes[:i], []rune("\n\t")...), runes[i:]...)
+				}
+				chatBox.SetText(chatBox.GetText(false) + "\n" + msg.ServiceID + "> " + string(runes))
 			}
 		}
 	}()
