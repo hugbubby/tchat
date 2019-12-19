@@ -114,7 +114,7 @@ func messageDoneFunc(inp messageDoneFuncInput) func(key tcell.Key) {
 				vals := make(url.Values)
 				vals["signature"] = []string{sigEnc}
 				vals["message"] = []string{msgEnc}
-				resp, err := c.PostForm(inp.destination+".onion/send", vals)
+                resp, err := c.PostForm("http://"+inp.destination+".onion/send", vals)
 				return msg, resp, err
 			}
 		}
