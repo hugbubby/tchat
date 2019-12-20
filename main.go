@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -41,21 +40,22 @@ func main() {
 	}
 
 	//Load public and private keys from disk
-	pubKey, privKey, err := GetKeys()
+	pubKey, _, err := GetKeys("onion_id_ecc")
 	if err != nil {
 		panic(errors.Wrap(err, "error reading encryption keys"))
 	}
 
 	messenger := make(chan Message)
 
+	app := tview.NewApplication()
 	chatWindow := tview.NewInputField()
 	chatWindow.SetDoneFunc(messageDoneFunc(messageDoneFuncInput{
+		app:         app,
 		conf:        conf,
 		messenger:   messenger,
 		item:        chatWindow,
 		destination: os.Args[1],
 		pubKey:      pubKey,
-		privKey:     privKey,
 	}))
 
 	chatView := tview.NewTextView()
@@ -65,15 +65,14 @@ func main() {
 		AddItem(chatView, 0, 30, true).
 		AddItem(chatWindow, 0, 1, true)
 
-	app := tview.NewApplication()
 	go func() {
 		err := syncChatLog(conf, messenger, chatView)
-	    app.Stop()
+		app.Stop()
 		log.Fatal(err)
 	}()
 
 	if err = app.SetRoot(flex, true).SetFocus(chatWindow).Run(); err != nil {
-	    app.Stop()
+		app.Stop()
 		log.Fatal(err)
 	}
 }
@@ -86,8 +85,8 @@ func serviceMessage(err error) Message {
 }
 
 type messageDoneFuncInput struct {
+	app         *tview.Application
 	conf        Config
-	privKey     ed25519.PrivateKey
 	pubKey      ed25519.PublicKey
 	messenger   chan<- Message
 	destination string
@@ -111,13 +110,10 @@ func messageDoneFunc(inp messageDoneFuncInput) func(key tcell.Key) {
 			if b, err := json.Marshal(msg); err != nil {
 				return msg, nil, err
 			} else {
-				msgEnc := base64.RawStdEncoding.EncodeToString(b)
-				sig := ed25519.Sign(inp.privKey, b)
-				sigEnc := base64.RawStdEncoding.EncodeToString(sig)
-				vals := make(url.Values)
-				vals["signature"] = []string{sigEnc}
-				vals["message"] = []string{msgEnc}
-				resp, err := c.PostForm("http://"+inp.destination+".onion/send", vals)
+				resp, err := c.PostForm("http://"+inp.conf.Tor.ProxyAddress+".onion/send", url.Values{
+					"destination": []string{inp.conf.PrivateServerAddress},
+					"message":     []string{string(b)},
+				})
 				return msg, resp, err
 			}
 		}
@@ -129,14 +125,15 @@ func messageDoneFunc(inp messageDoneFuncInput) func(key tcell.Key) {
 		} else if resp.StatusCode != 200 {
 			inp.messenger <- serviceMessage(errors.New("error sending message: received status code " + fmt.Sprintf("%d", resp.StatusCode)))
 		} else {
-			inp.item.SetText("")
 			inp.messenger <- message
 		}
+		inp.item.SetText("")
+		inp.app.Draw()
 	}
 }
 
 func syncChatLog(conf Config, messenger chan Message, chatBox *tview.TextView) error {
-	u := url.URL{Scheme: "ws", Host: conf.ServerAddress, Path: "/read"}
+	u := url.URL{Scheme: "ws", Host: conf.PrivateServerAddress, Path: "/read"}
 	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
 		return errors.Wrap(err, "could not connect to tchatd server")
@@ -161,14 +158,14 @@ func syncChatLog(conf Config, messenger chan Message, chatBox *tview.TextView) e
 			case msg := <-messenger:
 				runes := []rune(msg.Content)
 				for i := 0; i < len(runes); i++ {
-					if runes[i] == '\n' {
+					if runes[i] == rune('\n') {
 						runes = append(runes[:i], runes[i+1:]...)
 					}
 				}
-				for i := 0; i < len(runes); i += 80 {
-					runes = append(append(runes[:i], []rune("\n\t")...), runes[i:]...)
+				for i := 80; i < len(runes); i += 80 {
+					runes = append(runes[:i], append([]rune{'\n', '\t'}, runes[i:]...)...)
 				}
-				chatBox.SetText(chatBox.GetText(false) + "\n" + msg.ServiceID + "> " + string(runes))
+				chatBox.SetText(chatBox.GetText(false) + msg.ServiceID + "> " + string(runes) + "\n")
 			}
 		}
 	}()
